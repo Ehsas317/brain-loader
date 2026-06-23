@@ -1,0 +1,71 @@
+# Brain Loader Configuration
+# M1 Max 32GB — 25GB allocated to MLX models
+
+project:
+  name: "brain_loader"
+  tasks_dir: "./tasks"
+  logs_dir: "./logs"
+  max_iterations: 5  # Max review cycles before forcing completion
+
+# Telegram Bot Settings
+telegram:
+  token: "YOUR_BOT_TOKEN_HERE"  # From @BotFather
+  chat_id: "YOUR_CHAT_ID_HERE"   # Your personal chat ID
+  notify_on_start: true
+  notify_on_task_complete: true
+  notify_on_review: true
+  notify_on_final: true
+
+# Brain Model — The orchestrator (smaller, fast context switching)
+brain:
+  model_path: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+  # Alternative: "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
+  max_tokens_plan: 16384      # For creating master task list
+  max_tokens_review: 8192     # For reviewing worker results
+  max_tokens_final: 12288     # For final project review
+  temperature_plan: 0.7
+  temperature_review: 0.4
+  temperature_final: 0.5
+
+# Worker Models — Executors that get hot-swapped
+# IMPORTANT: Only ONE model in RAM at a time on 25GB budget
+workers:
+  nemotron_15b:
+    model_path: "mlx-community/Nemotron-4-15B-Instruct-4bit"
+    max_tokens: 8192
+    temperature: 0.3
+    description: "General reasoning and architecture tasks"
+    ram_estimate_gb: 9
+
+  codellama_7b:
+    model_path: "mlx-community/CodeLlama-7B-Instruct-MLX-4bit"
+    max_tokens: 12288
+    temperature: 0.2
+    description: "Code generation and implementation"
+    ram_estimate_gb: 4.5
+
+  deepseek_coder_6.7b:
+    model_path: "mlx-community/deepseek-coder-6.7b-instruct-MLX-4bit"
+    max_tokens: 12288
+    temperature: 0.2
+    description: "Alternative code specialist"
+    ram_estimate_gb: 4
+
+  llama3_8b:
+    model_path: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+    max_tokens: 8192
+    temperature: 0.4
+    description: "Balanced general worker"
+    ram_estimate_gb: 4.5
+
+# Task Generation Settings
+tasks:
+  min_tasks: 30
+  max_tasks: 80
+  default_worker: "nemotron_15b"
+
+# MLX Memory Management
+memory:
+  gc_sleep_seconds: 3          # Wait between offload/load
+  aggressive_cleanup: true     # Force mx.metal.clear_cache() if available
+  memory_pressure_threshold: 0.85  # If RAM usage > 85%, abort and cleanup

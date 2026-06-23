@@ -1,0 +1,15 @@
+# Brain Loader Dependencies
+# Install: pip install -r requirements.txt
+
+# MLX for Apple Silicon
+mlx>=0.15.0
+mlx-lm>=0.8.0
+
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# Config & Utilities
+pyyaml>=6.0
+
+# Optional but recommended
+huggingface-hub>=0.20.0  # For downloading MLX models
