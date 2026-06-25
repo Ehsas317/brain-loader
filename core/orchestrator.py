@@ -402,7 +402,10 @@ Be honest. A half-baked project helps no one.
                 for task in new_tasks:
                     self.task_mgr.add_task(task)
 
-                # Continue execution loop
+                # Continue execution loop — increment iteration BEFORE recursing
+                iteration += 1
+                self.task_mgr.state.iteration = iteration
+                self.task_mgr._save_state()
                 self._execute_tasks()
                 return
             else:
