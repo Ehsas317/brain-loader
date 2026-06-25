@@ -1,451 +1,268 @@
+#!/usr/bin/env python3
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FORGE  — FILE: core/task_manager.py                                     ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Forge (formerly Brain Loader v1)
+# REPO:       https://github.com/Ehsas317/forge
+# WHAT:       It hammers out a project sequentially, task by task, with
+#             iterative review. A forge is slow, hot, and precise.
+#
+# THIS FILE:
+#   Task Manager — decomposes project plans into actionable tasks, tracks
+#   dependencies, and manages task state throughout the build process.
+#
+# KEY COMPONENTS:
+#   - TaskManager: Main class for task decomposition and tracking
+#   - Task: Data class representing a single task
+#   - decompose_plan(): Breaks Brain plan into executable tasks
+#   - parse_plan(): Restores tasks from saved plan format
+#
+# HOW TO USE FORGE:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
+
 """
-Task Manager
-Handles markdown-based task/result files and project state.
+Forge — Task Manager
+
+Handles task decomposition, dependency tracking, and execution state.
 """
 
-import os
 import re
 import json
 import logging
-from datetime import datetime
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass, asdict
 from pathlib import Path
+from typing import List, Dict, Optional, Any
+from dataclasses import dataclass, field, asdict
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("forge.task_manager")
 
 
 @dataclass
 class Task:
-    """Represents a single task in the project."""
-    number: int
-    worker_model: str
-    title: str
-    subtasks: List[str]
-    pre_instructions: str
-    notes: str
-    max_tokens: int = 8192
-    status: str = "pending"  # pending, in_progress, completed, failed, remediation
-    rating: Optional[int] = None
-    review_notes: str = ""
-    result_file: Optional[str] = None
-    created_at: str = ""
-    completed_at: Optional[str] = None
+    """Represents a single development task."""
+    id: str
+    type: str  # frontend/backend/devops/security/docs/testing
+    description: str
+    dependencies: List[str] = field(default_factory=list)
+    status: str = "pending"  # pending/running/done/failed
+    priority: int = 1  # 1=high, 2=medium, 3=low
+    estimated_tokens: int = 4096
+    output_file: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        if not self.created_at:
-            self.created_at = datetime.now().isoformat()
+    def to_dict(self) -> Dict:
+        return asdict(self)
 
-
-@dataclass
-class ProjectState:
-    """Overall project state."""
-    project_name: str
-    app_idea: str
-    total_tasks: int = 0
-    completed_tasks: int = 0
-    current_task: int = 0
-    iteration: int = 0  # Review iteration counter
-    status: str = "initialized"  # initialized, planning, executing, reviewing, complete
-    brain_model: str = ""
-    created_at: str = ""
-
-    def __post_init__(self):
-        if not self.created_at:
-            self.created_at = datetime.now().isoformat()
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Task":
+        return cls(**data)
 
 
 class TaskManager:
     """
-    Manages all task files, results, and project state.
-    Uses markdown as the communication protocol between Brain and Workers.
+    Forge Task Manager
+
+    Decomposes project plans into actionable tasks, tracks dependencies,
+    and manages task state throughout the build process.
+
+    Usage:
+        manager = TaskManager()
+        tasks = manager.decompose_plan(brain_plan)
+        for task in tasks:
+            if manager.can_execute(task):
+                execute(task)
     """
 
-    def __init__(self, project_name: str, tasks_dir: str = "./tasks", 
-                 logs_dir: str = "./logs"):
-        self.project_name = project_name
-        self.tasks_dir = Path(tasks_dir)
-        self.logs_dir = Path(logs_dir)
+    # Task type patterns for auto-detection
+    TYPE_PATTERNS = {
+        "frontend": [
+            r"\b(react|vue|angular|frontend|ui|component|css|html|jsx|tsx)\b",
+            r"\b(screen|page|view|layout|modal|form|button)\b",
+        ],
+        "backend": [
+            r"\b(api|endpoint|server|database|model|schema|migration)\b",
+            r"\b(auth|login|register|middleware|controller|service)\b",
+        ],
+        "devops": [
+            r"\b(docker|dockerfile|ci/cd|pipeline|nginx|deploy)\b",
+            r"\b(kubernetes|k8s|terraform|ansible|github.action)\b",
+        ],
+        "security": [
+            r"\b(security|auth|oauth|jwt|encrypt|hash|sanitize)\b",
+            r"\b(vulnerability|xss|sql.injection|csp|cors)\b",
+        ],
+        "docs": [
+            r"\b(documentation|readme|api.doc|swagger|user.guide)\b",
+            r"\b(changelog|contributing|license|wiki)\b",
+        ],
+        "testing": [
+            r"\b(test|spec|jest|pytest|cypress|e2e|unit.test)\b",
+            r"\b(integration|coverage|mock|fixture|snapshot)\b",
+        ],
+    }
 
-        # Create directories
-        self.tasks_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self):
+        self.tasks: List[Task] = []
+        self.completed_ids: set = set()
+        self.failed_ids: set = set()
 
-        self.state_file = self.tasks_dir / "project_state.json"
-        self.master_log = self.tasks_dir / "master_log.md"
-        self.task_list_file = self.tasks_dir / "task_list.json"
-
-        self.state: Optional[ProjectState] = None
-        self.tasks: Dict[int, Task] = {}
-
-        logger.info("[TaskManager] Initialized for project: %s", project_name)
-
-    def initialize_project(self, app_idea: str, brain_model: str) -> ProjectState:
-        """Create new project state."""
-        self.state = ProjectState(
-            project_name=self.project_name,
-            app_idea=app_idea,
-            brain_model=brain_model,
-            status="initialized"
-        )
-        self._save_state()
-
-        # Initialize master log
-        self._write_master_log(f"""# Brain Loader Project Log
-
-**Project:** {self.project_name}
-**App Idea:** {app_idea}
-**Brain Model:** {brain_model}
-**Started:** {self.state.created_at}
-
----
-""")
-
-        logger.info("[TaskManager] Project initialized: %s", app_idea)
-        return self.state
-
-    def save_master_plan(self, plan_text: str) -> None:
-        """Save the Brain's master plan to a file."""
-        plan_file = self.tasks_dir / "master_plan.md"
-        with open(plan_file, "w") as f:
-            f.write(f"# Master Plan\n\n")
-            f.write(f"**Generated:** {datetime.now().isoformat()}\n\n")
-            f.write(plan_text)
-
-        self._write_master_log(f"Master plan created and saved to {plan_file}")
-        self.state.status = "planning"
-        self._save_state()
-        logger.info("[TaskManager] Master plan saved.")
-
-    def add_task(self, task: Task) -> None:
-        """Add a task to the project."""
-        self.tasks[task.number] = task
-        self._save_task_list()
-
-        # Write task file for worker
-        self._write_task_file(task)
-
-        self.state.total_tasks = len(self.tasks)
-        self._save_state()
-
-        logger.info("[TaskManager] Added task %d: %s", task.number, task.title)
-
-    def write_task_result(self, task_number: int, result_text: str,
-                          rating: Optional[int] = None,
-                          review_notes: str = "") -> str:
+    def decompose_plan(self, plan_text: str) -> List[Dict]:
         """
-        Write worker result to markdown file.
-        Returns path to result file.
+        Decompose a Brain plan into structured tasks.
+
+        Parses the plan text and extracts task definitions with IDs,
+        types, descriptions, and dependencies.
         """
-        task = self.tasks.get(task_number)
-        if not task:
-            raise ValueError(f"Task {task_number} not found")
+        logger.info("[TaskManager] Decomposing plan...")
 
-        result_file = self.tasks_dir / f"result_{task.number:03d}_{task.worker_model}.md"
+        tasks = []
+        task_pattern = r'(?:^|\n)\s*(?:Task|Step)\s*[#]?\s*(\w+)[\s:-]+(.+?)(?=\n(?:Task|Step)\s*[#]?\s*\w|\Z)'
 
-        content = f"""# Result: Task {task.number} — {task.title}
+        matches = re.findall(task_pattern, plan_text, re.IGNORECASE | re.DOTALL)
 
-**Worker Model:** {task.worker_model}
-**Status:** {"COMPLETED" if rating and rating >= 6 else "NEEDS_REVIEW"}
-**Completed At:** {datetime.now().isoformat()}
-**Rating:** {rating}/10 if rating else "Pending"
+        if not matches:
+            # Fallback: try simpler pattern
+            matches = self._simple_parse(plan_text)
 
-## Original Subtasks
-"""
-        for i, st in enumerate(task.subtasks, 1):
-            content += f"{i}. {st}\n"
+        for idx, (task_id, task_content) in enumerate(matches, 1):
+            task_id = task_id.strip() or f"T{idx:03d}"
+            task_type = self._detect_type(task_content)
+            description = task_content.strip()
 
-        content += f"""
-## Review Notes
-{review_notes if review_notes else "No review notes yet."}
+            # Extract dependencies
+            deps = self._extract_dependencies(description, tasks)
 
----
-
-## Worker Output
-
-{result_text}
-"""
-
-        with open(result_file, "w") as f:
-            f.write(content)
-
-        # Update task
-        task.result_file = str(result_file)
-        task.status = "completed" if (rating and rating >= 6) else "remediation"
-        task.rating = rating
-        task.review_notes = review_notes
-        task.completed_at = datetime.now().isoformat()
-
-        self._save_task_list()
-
-        # Log
-        self._write_master_log(
-            f"Task {task.number} completed. Rating: {rating}/10. "
-            f"Result: {result_file}"
-        )
-
-        logger.info("[TaskManager] Result written for task %d", task_number)
-        return str(result_file)
-
-    def get_task_file_content(self, task_number: int) -> str:
-        """Get the content of a task file for worker consumption."""
-        task = self.tasks.get(task_number)
-        if not task:
-            raise ValueError(f"Task {task_number} not found")
-
-        task_file = self.tasks_dir / f"task_{task.number:03d}_{task.worker_model}.md"
-        if not task_file.exists():
-            raise FileNotFoundError(f"Task file not found: {task_file}")
-
-        with open(task_file, "r") as f:
-            return f.read()
-
-    def get_result_content(self, task_number: int) -> Optional[str]:
-        """Get result content for Brain review."""
-        task = self.tasks.get(task_number)
-        if not task or not task.result_file:
-            return None
-
-        result_path = Path(task.result_file)
-        if not result_path.exists():
-            return None
-
-        with open(result_path, "r") as f:
-            return f.read()
-
-    def get_context_for_task(self, task_number: int, max_chars: int = 4000) -> str:
-        """
-        Aggregate relevant previous results as context.
-        Truncates to fit within context window budget.
-        """
-        context_parts = []
-
-        for num in range(1, task_number):
-            prev_task = self.tasks.get(num)
-            if not prev_task or not prev_task.result_file:
-                continue
-
-            result_content = self.get_result_content(num)
-            if not result_content:
-                continue
-
-            # Extract just the worker output section
-            output_match = re.search(
-                r"## Worker Output\n\n(.+)", 
-                result_content, 
-                re.DOTALL
+            task = Task(
+                id=task_id,
+                type=task_type,
+                description=description,
+                dependencies=deps,
+                priority=1 if idx <= 3 else 2,
             )
 
-            if output_match:
-                output = output_match.group(1)[:1500]  # Truncate each
-            else:
-                output = result_content[:1500]
+            tasks.append(task.to_dict())
+            logger.debug("[TaskManager] Created task %s (%s)", task_id, task_type)
 
-            context_parts.append(
-                f"### Context from Task {num} ({prev_task.worker_model})\n{output}\n"
-            )
+        logger.info("[TaskManager] Decomposed into %d tasks", len(tasks))
+        return tasks
 
-        full_context = "\n".join(context_parts)
+    def _simple_parse(self, plan_text: str) -> List[tuple]:
+        """Simple fallback parser for non-structured plans."""
+        lines = plan_text.split('\n')
+        tasks = []
+        current_id = None
+        current_content = []
 
-        # Truncate if too long
-        if len(full_context) > max_chars:
-            full_context = full_context[:max_chars] + "\n\n[Context truncated...]"
+        for line in lines:
+            # Look for numbered items or bullet points
+            match = re.match(r'^(?:\d+\.\s*|[-*]\s+)(.+)', line)
+            if match:
+                if current_id:
+                    tasks.append((current_id, '\n'.join(current_content)))
+                current_id = f"T{len(tasks) + 1:03d}"
+                current_content = [match.group(1)]
+            elif current_id and line.strip():
+                current_content.append(line)
 
-        return full_context if full_context else "No previous context available."
+        if current_id:
+            tasks.append((current_id, '\n'.join(current_content)))
 
-    def get_all_results_summary(self) -> str:
-        """Get summary of all results for final review."""
-        summary_parts = []
+        return tasks
 
-        for num in sorted(self.tasks.keys()):
-            task = self.tasks[num]
-            summary_parts.append(
-                f"Task {num}: {task.title} | "
-                f"Worker: {task.worker_model} | "
-                f"Rating: {task.rating}/10 | "
-                f"Status: {task.status}"
-            )
+    def _detect_type(self, content: str) -> str:
+        """Auto-detect task type from content."""
+        content_lower = content.lower()
 
-        return "\n".join(summary_parts)
+        for task_type, patterns in self.TYPE_PATTERNS.items():
+            for pattern in patterns:
+                if re.search(pattern, content_lower):
+                    return task_type
 
-    def get_next_pending_task(self) -> Optional[Task]:
-        """Get the next task that needs execution."""
-        for num in sorted(self.tasks.keys()):
-            task = self.tasks[num]
-            if task.status in ("pending", "remediation"):
-                return task
-        return None
+        return "general"
 
-    def mark_task_in_progress(self, task_number: int) -> None:
-        """Mark a task as currently being worked on."""
-        task = self.tasks.get(task_number)
-        if task:
-            task.status = "in_progress"
-            self.state.current_task = task_number
-            self._save_task_list()
-            self._save_state()
+    def _extract_dependencies(self, content: str, existing_tasks: List) -> List[str]:
+        """Extract task dependencies from content."""
+        deps = []
+        # Look for references to other task IDs
+        for task in existing_tasks:
+            task_id = task.id if hasattr(task, 'id') else task.get('id', '')
+            if task_id and task_id in content:
+                deps.append(task_id)
+        return deps
 
-    def update_state_status(self, status: str) -> None:
-        """Update overall project status."""
-        self.state.status = status
-        self._save_state()
-
-    def add_remediation_task(self, original_task_num: int, 
-                            instructions: str) -> Task:
-        """Create a remediation task based on Brain feedback."""
-        # Find next available task number
-        max_num = max(self.tasks.keys()) if self.tasks else 0
-        new_num = max_num + 1
-
-        original = self.tasks.get(original_task_num)
-        worker = original.worker_model if original else "codellama_7b"
-
-        remediation = Task(
-            number=new_num,
-            worker_model=worker,
-            title=f"REMEDIATION: Task {original_task_num}",
-            subtasks=[
-                f"Review and fix issues from Task {original_task_num}",
-                instructions,
-                "Ensure all previous issues are resolved",
-                "Output complete corrected implementation"
-            ],
-            pre_instructions=f"""This is a REMEDIATION task. 
-The previous attempt (Task {original_task_num}) was rated below 6/10.
-Brain's feedback: {instructions}
-
-You MUST:
-1. Read the previous result carefully
-2. Fix ALL identified issues
-3. Output complete, corrected code/documentation
-4. Do not reference the previous failure — just produce the correct output""",
-            notes=f"Remediation for Task {original_task_num}",
-            status="pending"
-        )
-
-        self.add_task(remediation)
-
-        self._write_master_log(
-            f"Remediation task {new_num} created for Task {original_task_num}. "
-            f"Reason: {instructions[:200]}"
-        )
-
-        return remediation
-
-    def _write_task_file(self, task: Task) -> None:
-        """Generate the markdown task file for a worker."""
-        task_file = self.tasks_dir / f"task_{task.number:03d}_{task.worker_model}.md"
-
-        # Get context from previous tasks
-        context = self.get_context_for_task(task.number)
-
-        content = f"""# Task {task.number}: {task.title}
-
-**Assigned Worker:** {task.worker_model}
-**Max Output Tokens:** {task.max_tokens}
-**Project:** {self.project_name}
-
----
-
-## Pre-Instructions (READ CAREFULLY)
-{task.pre_instructions}
-
----
-
-## Context from Previous Tasks
-{context}
-
----
-
-## Your Subtasks
-"""
-        for i, st in enumerate(task.subtasks, 1):
-            content += f"### {i}. {st}\n\n"
-
-        content += f"""
----
-
-## Output Requirements
-1. Write your complete response in markdown format
-2. Include all code with proper syntax highlighting
-3. Explain your reasoning for architectural decisions
-4. If you create files, list them with their purposes
-5. End with a summary of what was accomplished
-
-## Notes for Brain
-{task.notes if task.notes else "No special notes."}
-
----
-*Task generated by Brain Loader at {datetime.now().isoformat()}*
-"""
-
-        with open(task_file, "w") as f:
-            f.write(content)
-
-    def _write_master_log(self, entry: str) -> None:
-        """Append to master log file."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(self.master_log, "a") as f:
-            f.write(f"\n\n---\n**[{timestamp}]**\n\n{entry}\n")
-
-    def _save_state(self) -> None:
-        """Save project state to JSON."""
-        if self.state:
-            with open(self.state_file, "w") as f:
-                json.dump(asdict(self.state), f, indent=2)
-
-    def _save_task_list(self) -> None:
-        """Save all tasks to JSON."""
-        tasks_data = {str(k): asdict(v) for k, v in self.tasks.items()}
-        with open(self.task_list_file, "w") as f:
-            json.dump(tasks_data, f, indent=2)
-
-    def load_existing_project(self) -> bool:
-        """Try to load existing project state. Returns True if found."""
-        if not self.state_file.exists():
-            return False
-
+    def parse_plan(self, plan_data: str) -> List[Dict]:
+        """Parse a saved plan file back into tasks."""
+        # Try JSON first
         try:
-            with open(self.state_file, "r") as f:
-                state_data = json.load(f)
-            self.state = ProjectState(**state_data)
+            data = json.loads(plan_data)
+            if isinstance(data, list):
+                return data
+            return data.get("tasks", [])
+        except json.JSONDecodeError:
+            pass
 
-            if self.task_list_file.exists():
-                with open(self.task_list_file, "r") as f:
-                    tasks_data = json.load(f)
-                self.tasks = {
-                    int(k): Task(**v) for k, v in tasks_data.items()
-                }
+        # Try markdown format
+        return self.decompose_plan(plan_data)
 
-            logger.info("[TaskManager] Loaded existing project with %d tasks", 
-                       len(self.tasks))
-            return True
+    def can_execute(self, task: Dict) -> bool:
+        """Check if a task's dependencies are satisfied."""
+        deps = task.get("dependencies", [])
+        return all(dep in self.completed_ids for dep in deps)
 
-        except Exception as e:
-            logger.error("[TaskManager] Failed to load existing project: %s", e)
-            return False
+    def mark_complete(self, task_id: str):
+        """Mark a task as completed."""
+        self.completed_ids.add(task_id)
+        logger.info("[TaskManager] Task %s marked complete", task_id)
 
-    def get_project_summary(self) -> str:
-        """Get human-readable project summary."""
-        if not self.state:
-            return "No active project."
+    def mark_failed(self, task_id: str):
+        """Mark a task as failed."""
+        self.failed_ids.add(task_id)
+        logger.warning("[TaskManager] Task %s failed", task_id)
 
-        lines = [
-            f"Project: {self.state.project_name}",
-            f"Status: {self.state.status}",
-            f"Tasks: {self.state.completed_tasks}/{self.state.total_tasks} completed",
-            f"Current Task: {self.state.current_task}",
-            f"Brain: {self.state.brain_model}",
-            "",
-            "Task Breakdown:"
+    def get_next_task(self) -> Optional[Dict]:
+        """Get the next executable task by priority."""
+        pending = [
+            t for t in self.tasks
+            if t.get("status") == "pending" and t.get("id") not in self.failed_ids
         ]
 
-        for num in sorted(self.tasks.keys()):
-            t = self.tasks[num]
-            status_icon = "✅" if t.status == "completed" else "⏳" if t.status == "pending" else "🔧"
-            lines.append(
-                f"  {status_icon} Task {num}: {t.title} "
-                f"({t.worker_model}) — {t.status}"
-            )
+        # Sort by priority
+        pending.sort(key=lambda t: t.get("priority", 99))
 
-        return "\n".join(lines)
+        for task in pending:
+            if self.can_execute(task):
+                return task
+
+        return None
+
+    def get_progress(self) -> Dict[str, int]:
+        """Get current task progress statistics."""
+        total = len(self.tasks)
+        completed = len(self.completed_ids)
+        failed = len(self.failed_ids)
+        pending = total - completed - failed
+
+        return {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "pending": pending,
+            "percent": (completed / total * 100) if total > 0 else 0,
+        }
+
+    def save_tasks(self, filepath: str = "memory/tasks.json"):
+        """Save current tasks to disk."""
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            json.dump(self.tasks, f, indent=2)
+
+    def load_tasks(self, filepath: str = "memory/tasks.json"):
+        """Load tasks from disk."""
+        with open(filepath, 'r') as f:
+            self.tasks = json.load(f)
