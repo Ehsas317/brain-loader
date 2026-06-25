@@ -1,15 +1,47 @@
-# Brain Loader Dependencies
-# Install: pip install -r requirements.txt
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FORGE  — FILE: requirements.txt                                         ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Forge (formerly Brain Loader v1)
+# REPO:       https://github.com/Ehsas317/forge
+# WHAT:       It hammers out a project sequentially, task by task, with
+#             iterative review. A forge is slow, hot, and precise.
+#
+# THIS FILE:
+#   Python dependencies for Forge. Install with: pip install -r requirements.txt
+#
+# HOW TO USE FORGE:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
 
-# MLX for Apple Silicon
-mlx>=0.15.0
-mlx-lm>=0.8.0
+# Core framework for MLX on Apple Silicon
+mlx>=0.23.0
+mlx-lm>=0.21.0
 
-# Telegram Bot
-python-telegram-bot>=20.0
+# Model and tokenization
+transformers>=4.40.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
 
-# Config & Utilities
-pyyaml>=6.0
+# Utilities
+pyyaml>=6.0.1
+httpx>=0.27.0
+python-telegram-bot>=21.0
 
-# Optional but recommended
-huggingface-hub>=0.20.0  # For downloading MLX models
+# Typed settings
+pydantic>=2.7.0
+
+# (Optional) For GGUF model support — use latest commit for bug fixes
+# gguf>=0.6.0
+
+# (Optional) For QLoRA fine-tuning your own worker models
+# peft>=0.11.0
+# trl>=0.8.0
+
+# (Optional) For cloud API fallbacks
+# openai>=1.30.0
+# anthropic>=0.28.0
