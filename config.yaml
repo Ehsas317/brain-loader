@@ -1,71 +1,112 @@
-# Brain Loader Configuration
-# M1 Max 32GB — 25GB allocated to MLX models
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FORGE  — FILE: config.yaml                                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Forge (formerly Brain Loader v1)
+# REPO:       https://github.com/Ehsas317/forge
+# WHAT:       It hammers out a project sequentially, task by task, with
+#             iterative review. A forge is slow, hot, and precise.
+#
+# THIS FILE:
+#   Configuration for the Forge orchestrator. Defines model paths, API keys,
+#   worker assignments, and build parameters. Copy this to config.yaml and
+#   fill in your tokens.
+#
+# HOW TO USE FORGE:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Copy this file to config.yaml, add your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
 
-project:
-  name: "brain_loader"
-  tasks_dir: "./tasks"
-  logs_dir: "./logs"
-  max_iterations: 5  # Max review cycles before forcing completion
+# ============================================================
+# FORGE CONFIGURATION
+# ============================================================
+# Hardware: MacBook Pro M1 Max 32GB (25GB allocated)
+# All models are QLoRA-adapted Mistral-7B-Instruct-v0.3
+# Generation uses greedy decoding (temperature=0) for deterministic output
+# ============================================================
 
-# Telegram Bot Settings
-telegram:
-  token: "YOUR_BOT_TOKEN_HERE"  # From @BotFather
-  chat_id: "YOUR_CHAT_ID_HERE"   # Your personal chat ID
-  notify_on_start: true
-  notify_on_task_complete: true
-  notify_on_review: true
-  notify_on_final: true
+app_name: "forge"
 
-# Brain Model — The orchestrator (smaller, fast context switching)
-brain:
-  model_path: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
-  # Alternative: "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
-  max_tokens_plan: 16384      # For creating master task list
-  max_tokens_review: 8192     # For reviewing worker results
-  max_tokens_final: 12288     # For final project review
-  temperature_plan: 0.7
-  temperature_review: 0.4
-  temperature_final: 0.5
+# Max tokens per worker generation (tailored for 32GB MacBook Pro M1 Max)
+# Adjusted to utilize ~25GB of available 32GB RAM
+max_worker_tokens: 4096
+max_brain_tokens: 8192
 
-# Worker Models — Executors that get hot-swapped
-# IMPORTANT: Only ONE model in RAM at a time on 25GB budget
-workers:
-  nemotron_15b:
-    model_path: "mlx-community/Nemotron-4-15B-Instruct-4bit"
+# Worker model configurations — each specialized for a different task
+# Use paths relative to this config file or absolute paths
+# If a model fails to load, Forge will attempt cloud fallbacks
+
+models:
+  # ——— Central Brain Model (planning + review) ———
+  forge-brain:
+    description: "Central planning, architecture decisions, and code review"
+    path: "./models/forge-brain-q4.gguf"
+    # Or use cloud: "claude-sonnet-4-20250514"
     max_tokens: 8192
-    temperature: 0.3
-    description: "General reasoning and architecture tasks"
-    ram_estimate_gb: 9
+    ram_estimate_gb: 5
 
-  codellama_7b:
-    model_path: "mlx-community/CodeLlama-7B-Instruct-MLX-4bit"
-    max_tokens: 12288
-    temperature: 0.2
-    description: "Code generation and implementation"
+  # ——— Worker Models (generation only) ———
+  forge-coder:
+    description: "Frontend code generation (React, Vue, HTML/CSS, TypeScript)"
+    path: "./models/forge-coder-q4.gguf"
+    max_tokens: 4096
     ram_estimate_gb: 4.5
 
-  deepseek_coder_6.7b:
-    model_path: "mlx-community/deepseek-coder-6.7b-instruct-MLX-4bit"
-    max_tokens: 12288
-    temperature: 0.2
-    description: "Alternative code specialist"
+  forge-coderx:
+    description: "Backend code generation (APIs, DB, auth, business logic)"
+    path: "./models/forge-coderx-q6.gguf"
+    max_tokens: 4096
+    ram_estimate_gb: 6
+
+  forge-devops:
+    description: "DevOps files (Docker, CI/CD, Nginx, scripts)"
+    path: "./models/forge-devops-q4.gguf"
+    max_tokens: 2048
     ram_estimate_gb: 4
 
-  llama3_8b:
-    model_path: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
-    max_tokens: 8192
-    temperature: 0.4
-    description: "Balanced general worker"
-    ram_estimate_gb: 4.5
+  forge-security:
+    description: "Security audit and code review"
+    path: "./models/forge-security-q5.gguf"
+    max_tokens: 4096
+    ram_estimate_gb: 5
 
-# Task Generation Settings
-tasks:
-  min_tasks: 30
-  max_tasks: 80
-  default_worker: "nemotron_15b"
+  forge-docs:
+    description: "Documentation generation (README, API docs, user guides)"
+    path: "./models/forge-docs-q4.gguf"
+    max_tokens: 4096
+    ram_estimate_gb: 3.5
 
-# MLX Memory Management
-memory:
-  gc_sleep_seconds: 3          # Wait between offload/load
-  aggressive_cleanup: true     # Force mx.metal.clear_cache() if available
-  memory_pressure_threshold: 0.85  # If RAM usage > 85%, abort and cleanup
+  forge-qa:
+    description: "Test suite generation (unit, integration, e2e)"
+    path: "./models/forge-qa-q4.gguf"
+    max_tokens: 4096
+    ram_estimate_gb: 4
+
+# Telegram notifications (optional — get token from @BotFather)
+telegram:
+  enabled: true
+  bot_token: "YOUR_BOT_TOKEN"
+  chat_id: "YOUR_CHAT_ID"
+
+# Cloud API fallbacks (used when local models fail)
+# Get keys from: deepseek.com, mistral.ai, anthropic.com, together.ai
+cloud:
+  deepseek:
+    api_key: "YOUR_DEEPSEEK_KEY"
+    model: "deepseek-chat"
+    endpoint: "https://api.deepseek.com/v1"
+  mistral:
+    api_key: "YOUR_MISTRAL_KEY"
+    model: "mistral-small"
+    endpoint: "https://api.mistral.ai/v1"
+  anthropic:
+    api_key: "YOUR_ANTHROPIC_KEY"
+    model: "claude-sonnet-4-20250514"
+    endpoint: "https://api.anthropic.com/v1"
+  together:
+    api_key: "YOUR_TOGETHER_KEY"
+    model: "meta-llama/Llama-4-Maverick-17B"
+    endpoint: "https://api.together.ai/v1"

@@ -1,6 +1,31 @@
 #!/usr/bin/env python3
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FORGE  — FILE: main.py                                                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Forge (formerly Brain Loader v1)
+# REPO:       https://github.com/Ehsas317/forge
+# WHAT:       It hammers out a project sequentially, task by task, with
+#             iterative review. A forge is slow, hot, and precise.
+#
+# THIS FILE:
+#   Entry point for the Forge multi-agent AI orchestrator.
+#   Parses CLI args, sets up logging, initializes the BrainOrchestrator,
+#   and kicks off the build process.
+#
+# HOW TO USE FORGE:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Build a React Native fitness app"
+#
+# HARDWARE TARGET: MacBook Pro M1 Max 32GB (25GB allocated)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
+
 """
-Brain Loader — Main Entry Point
+Forge — Main Entry Point
 
 Usage:
     python main.py "Build a React Native fitness app with AI meal planner"
@@ -26,7 +51,7 @@ def setup_logging(logs_dir: str = "./logs"):
     """Configure logging to file and console."""
     Path(logs_dir).mkdir(parents=True, exist_ok=True)
 
-    log_file = Path(logs_dir) / f"brain_loader_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = Path(logs_dir) / f"forge_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
     logging.basicConfig(
         level=logging.INFO,
@@ -46,7 +71,7 @@ def setup_logging(logs_dir: str = "./logs"):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Brain Loader — MLX Multi-Agent Orchestrator"
+        description="Forge — MLX Multi-Agent Orchestrator"
     )
     parser.add_argument(
         "idea",
@@ -76,7 +101,7 @@ def main():
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 70)
-    logger.info("BRAIN LOADER — MLX Multi-Agent Orchestrator")
+    logger.info("FORGE — MLX Multi-Agent Orchestrator")
     logger.info("Hardware: MacBook Pro M1 Max 32GB (25GB allocated)")
     logger.info("=" * 70)
 
@@ -114,7 +139,7 @@ def main():
         orchestrator.run(app_idea=args.idea, resume=False)
     else:
         # Interactive mode
-        print("\n🧠 Brain Loader — MLX Multi-Agent Orchestrator")
+        print("\n🔥 Forge — MLX Multi-Agent Orchestrator")
         print("=" * 50)
         print()
         print("What app/project would you like to build?")
@@ -130,7 +155,7 @@ def main():
         logger.info("Starting new project: %s", idea)
         orchestrator.run(app_idea=idea, resume=False)
 
-    logger.info("Brain Loader finished. Log saved to: %s", log_file)
+    logger.info("Forge finished. Log saved to: %s", log_file)
     print(f"\n✅ Done! Check logs at: {log_file}")
 
 
