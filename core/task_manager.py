@@ -271,7 +271,7 @@ class TaskManager:
     def get_next_pending_task(self) -> Optional[Task]:
         """Get the next task that needs execution."""
         for num in sorted(self.tasks.keys()):
-            task = self.tasks[task_number]
+            task = self.tasks[num]
             if task.status in ("pending", "remediation"):
                 return task
         return None
