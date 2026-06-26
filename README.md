@@ -1,4 +1,4 @@
-# Forge (formerly Brain Loader)
+# Brain Loader
 
 Forge is the first iteration of the AI Build Engine. It uses a multi-agent architecture with local LLMs via MLX and optional cloud fallbacks. The Brain model plans tasks, worker models execute them, and the Brain reviews each output before approving. Forge is slow, hot, and precise—it hammers out projects sequentially, task by task, with iterative review.
 
