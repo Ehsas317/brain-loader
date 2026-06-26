@@ -31,6 +31,11 @@
 Forge — MLX Model Manager
 
 Handles loading, generation, and memory management for local LLM models.
+
+RECOMMENDED USAGE: Use model_scope() context manager for guaranteed cleanup:
+    with manager.model_scope("forge-coder") as m:
+        result = m.generate("Write a React component...")
+    # Model is automatically unloaded here
 """
 
 import gc
@@ -38,6 +43,7 @@ import re
 import time
 import json
 import logging
+import weakref
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
@@ -77,6 +83,10 @@ class MLXManager:
         manager.load_model("forge-coder")
         result = manager.generate("Write a React component...")
         manager.unload_model()  # Free memory
+
+    BEST PRACTICE: Use model_scope() context manager for automatic cleanup:
+        with manager.model_scope("forge-coder") as m:
+            result = m.generate("...")
     """
 
     def __init__(self, config: Dict[str, ModelConfig], device_ram_gb: float = 32.0):
@@ -90,6 +100,9 @@ class MLXManager:
         # Performance tracking
         self.load_times: Dict[str, float] = {}
         self.gen_stats = {"calls": 0, "tokens": 0, "errors": 0}
+        
+        # Track instances for cleanup warnings
+        self._cleaned_up = False
 
     def load_model(self, model_key: str) -> None:
         """Load a model by key from config."""
@@ -136,6 +149,7 @@ class MLXManager:
             self.model = None
             self.tokenizer = None
             self.current_model_key = None
+            self._cleaned_up = True
             gc.collect()
             mx.clear_cache()
             logger.info("[MLXManager] Model unloaded, memory freed")
@@ -226,7 +240,16 @@ class MLXManager:
 
     @contextmanager
     def model_scope(self, model_key: str):
-        """Context manager for loading a model, yielding, then unloading."""
+        """
+        Context manager for loading a model, yielding, then unloading.
+        
+        This is the RECOMMENDED way to use MLXManager as it guarantees
+        cleanup even if exceptions occur.
+        
+        Usage:
+            with manager.model_scope("forge-coder") as m:
+                result = m.generate("Write a React component...")
+        """
         self.load_model(model_key)
         try:
             yield self
@@ -244,7 +267,23 @@ class MLXManager:
             "utilization_pct": (active_mem / self.device_ram_gb) * 100,
         }
 
-    def __del__(self):
-        """Cleanup on deletion."""
+    def cleanup(self) -> None:
+        """Explicit cleanup. Call this when done with the manager."""
         if self.model is not None:
             self.unload_model()
+        self._cleaned_up = True
+
+    def __del__(self):
+        """
+        DEPRECATED: Do not rely on __del__ for cleanup.
+        
+        Python's __del__ is unreliable — it's not guaranteed to be called,
+        and can cause issues with garbage collection. Use model_scope()
+        context manager or call cleanup() explicitly instead.
+        """
+        if getattr(self, 'model', None) is not None and not getattr(self, '_cleaned_up', False):
+            logger.warning(
+                "[MLXManager] Model %s was not cleaned up properly. "
+                "Use model_scope() context manager for guaranteed cleanup.",
+                self.current_model_key
+            )
